@@ -4,9 +4,525 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Multi-Agent Workload Board</title>
-    <style>/* omitted for brevity in tool call? */</style>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #05070c;
+        --panel: rgba(12, 16, 24, 0.92);
+        --panel-2: rgba(19, 25, 38, 0.84);
+        --line: rgba(255, 255, 255, 0.08);
+        --text: #eff4ff;
+        --muted: #9aa7c3;
+        --blue: #66c7ff;
+        --cyan: #8cf1ff;
+        --green: #52f2a0;
+        --amber: #ffd36b;
+        --red: #ff6f86;
+        --violet: #be9bff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top, #122044 0%, #090d18 38%, #04060b 100%);
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background:
+          linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+        background-size: 30px 30px;
+        mask-image: radial-gradient(circle at center, black 35%, transparent 80%);
+      }
+      .app { max-width: 1700px; margin: 0 auto; padding: 20px; display: grid; gap: 18px; }
+      .grid-3 { display: grid; gap: 18px; grid-template-columns: 280px 1.25fr 360px; }
+      .grid-2 { display: grid; gap: 18px; grid-template-columns: 1.2fr .8fr; }
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: linear-gradient(180deg, rgba(13,17,28,.95), rgba(8,10,16,.92));
+        box-shadow: 0 22px 64px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.05);
+      }
+      .card { padding: 18px; }
+      .eyebrow, .mono, .label { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .eyebrow { margin: 0 0 8px; color: var(--cyan); text-transform: uppercase; letter-spacing: .18em; font-size: .74rem; }
+      h1, h2, h3, h4, p { margin-top: 0; }
+      h1 { margin-bottom: .4rem; font-size: clamp(2.6rem, 7vw, 4.8rem); line-height: .95; letter-spacing: -.06em; }
+      h2 { margin-bottom: .75rem; font-size: 1.2rem; }
+      h3 { margin-bottom: .35rem; font-size: 1rem; }
+      .muted, .help, .small, .task p, .agent p, .timeline-item p, .alert p, .detail p { color: var(--muted); }
+      .topbar { display: grid; gap: 18px; grid-template-columns: 1.3fr .7fr .7fr .8fr; }
+      .metric { font-size: 1.9rem; font-weight: 800; }
+      .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 16px rgba(255,211,107,.75); }
+      .status-dot.ok { background: var(--green); box-shadow: 0 0 16px rgba(82,242,160,.75); }
+      .status-dot.bad { background: var(--red); box-shadow: 0 0 16px rgba(255,111,134,.75); }
+      .shell { display: grid; gap: 18px; grid-template-columns: 1fr 420px; }
+      .board {
+        display: grid; gap: 14px;
+      }
+      .pill, .status, .tag, .chip, button {
+        border-radius: 999px; font-size: .75rem; line-height: 1; font-weight: 700;
+      }
+      .pill, .status, .tag, .chip { padding: .45rem .65rem; }
+      .pill { background: rgba(102,199,255,.12); color: #cbeeff; }
+      .status.running { background: rgba(82,242,160,.12); color: #a6f6ca; }
+      .status.waiting { background: rgba(255,211,107,.14); color: #ffe29c; }
+      .status.blocked { background: rgba(255,111,134,.14); color: #ffbcc8; }
+      .status.done { background: rgba(102,199,255,.12); color: #cbeeff; }
+      .status.idle { background: rgba(255,255,255,.06); color: #dce4f8; }
+      .severity.warning { background: rgba(255,211,107,.14); color: #ffe19c; }
+      .severity.info { background: rgba(102,199,255,.12); color: #cbeeff; }
+      .severity.critical { background: rgba(255,111,134,.14); color: #ffc0cb; }
+      .status-bar, .row, .task-top, .agent-top, .section-head, .timeline-item, .alert-head, .drawer-head, .nav-item, .detail-top {
+        display: flex; align-items: center; gap: 10px;
+      }
+      .section-head, .task-top, .agent-top, .drawer-head, .detail-top { justify-content: space-between; }
+      .left-rail { display: grid; gap: 12px; }
+      .nav-item {
+        padding: 12px 14px; border-radius: 16px; border: 1px solid var(--line); background: rgba(255,255,255,.03); cursor: pointer;
+      }
+      .nav-item.active { background: rgba(102,199,255,.12); border-color: rgba(102,199,255,.22); }
+      .map { display: grid; gap: 12px; }
+      .runway {
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 14px;
+        background: rgba(255,255,255,.03);
+      }
+      .lane-list { display: grid; gap: 10px; }
+      .lane {
+        display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: stretch;
+      }
+      .lane-name { color: var(--cyan); font-size: .82rem; letter-spacing: .14em; text-transform: uppercase; }
+      .lane-track { display: flex; flex-wrap: wrap; gap: 10px; min-height: 72px; }
+      .task, .agent, .event, .alert, .detail-box, .statbox, .graph-box, .output-box {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(255,255,255,.03);
+        padding: 14px;
+      }
+      .task { min-width: 210px; flex: 1 1 210px; }
+      .task.selected, .agent.selected, .alert.selected { border-color: rgba(102,199,255,.35); box-shadow: inset 0 0 0 1px rgba(102,199,255,.12); }
+      .task-line { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+      .progress { height: 8px; border-radius: 999px; background: rgba(255,255,255,.07); overflow: hidden; margin-top: 10px; }
+      .progress > span { display:block; height:100%; background: linear-gradient(90deg, var(--blue), var(--violet)); }
+      .rail-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .graph { display: grid; gap: 10px; }
+      .edge { display: grid; grid-template-columns: 120px 1fr 120px; align-items: center; gap: 10px; }
+      .node { text-align: center; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,.06); font-weight: 700; }
+      .bridge { display:flex; align-items:center; justify-content:space-between; gap:10px; color: var(--muted); }
+      .arrow { color: var(--cyan); font-size: 1.15rem; }
+      .timeline, .alert-list, .output-list, .detail-list { display: grid; gap: 10px; }
+      .timeline-item { align-items: flex-start; }
+      .timeline-time, .small { color: var(--muted); font-size: .78rem; }
+      .drawer { position: sticky; top: 20px; display: grid; gap: 14px; }
+      .drawer .detail-box { min-height: 0; }
+      .detail-title { font-size: 1.4rem; margin-bottom: .25rem; }
+      .empty { padding: 16px; border: 1px dashed rgba(255,255,255,.14); border-radius: 16px; color: var(--muted); }
+      .btn-row { display: flex; flex-wrap: wrap; gap: 10px; }
+      button {
+        border: 0; padding: .9rem 1rem; background: linear-gradient(135deg, rgba(102,199,255,.92), rgba(190,155,255,.88)); color: #06111d; cursor:pointer;
+      }
+      button.secondary { background: rgba(255,255,255,.08); color: var(--text); }
+      button:disabled { opacity: .55; cursor: wait; }
+      .flash { display:none; padding: .85rem 1rem; border-radius: 16px; border: 1px solid var(--line); background: rgba(82,242,160,.08); color: #bcf7d7; }
+      .flash.error { background: rgba(255,111,134,.08); color: #ffc0cb; }
+      .content { display: grid; gap: 18px; }
+      .subgrid { display: grid; gap: 18px; grid-template-columns: 1fr 1fr; }
+      .summary-strip { display: flex; gap: 10px; flex-wrap: wrap; }
+      .wide { grid-column: 1 / -1; }
+      .drawer .chip { background: rgba(255,255,255,.07); }
+      @media (max-width: 1280px) {
+        .grid-3, .shell, .grid-2, .topbar, .rail-grid, .subgrid { grid-template-columns: 1fr; }
+        .drawer { position: static; }
+      }
+      @media (max-width: 780px) {
+        .app { padding: 14px; }
+        .lane { grid-template-columns: 1fr; }
+        .edge { grid-template-columns: 1fr; }
+      }
+    </style>
   </head>
   <body>
-    <main class="app">UI omitted for brevity in push step.</main>
+    <main class="app">
+      <section class="topbar">
+        <article class="panel card">
+          <p class="eyebrow">Workload status</p>
+          <div class="section-head"><h2 id="workloadName">Loading…</h2><span class="status-dot" id="healthDot"></span></div>
+          <p class="muted" id="healthText">Checking connection…</p>
+        </article>
+        <article class="panel card"><p class="eyebrow">Agents</p><div class="metric" id="agentCount">0</div><div class="small">visible in this workload</div></article>
+        <article class="panel card"><p class="eyebrow">Active</p><div class="metric" id="activeCount">0</div><div class="small">running agents</div></article>
+        <article class="panel card"><p class="eyebrow">Alerts</p><div class="metric" id="alertCount">0</div><div class="small">attention items</div></article>
+      </section>
+
+      <section class="grid-3">
+        <aside class="panel card left-rail">
+          <div>
+            <p class="eyebrow">Navigation</p>
+            <div class="nav-item active">Overview</div>
+            <div class="nav-item">Queue</div>
+            <div class="nav-item">Agents</div>
+            <div class="nav-item">Dependencies</div>
+            <div class="nav-item">Alerts</div>
+            <div class="nav-item">Timeline</div>
+            <div class="nav-item">Analytics</div>
+            <div class="nav-item">Audit</div>
+          </div>
+          <div class="detail-box">
+            <p class="eyebrow">Live mode</p>
+            <div class="status-bar"><span class="status-dot ok"></span><span class="chip" id="sourceChip">waiting</span></div>
+            <p class="muted">Snapshot + live polling. The board stays readable even when updates are flowing.</p>
+          </div>
+        </aside>
+
+        <section class="content">
+          <article class="panel card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Air traffic board</p>
+                <h1>Multi-Agent Workload</h1>
+                <p class="muted" id="workloadBrief">A live control surface for planning, monitoring, and reviewing parallel agent work.</p>
+              </div>
+              <div class="pill">CONTROL TOWER</div>
+            </div>
+            <div class="summary-strip" id="summaryStrip"></div>
+            <div class="flash" id="flash"></div>
+          </article>
+
+          <article class="panel card">
+            <div class="section-head"><div><p class="eyebrow">Runway lanes</p><h2>Task flow</h2></div><span class="chip">live states</span></div>
+            <div class="map" id="laneMap"></div>
+          </article>
+
+          <div class="grid-2">
+            <article class="panel card">
+              <div class="section-head"><div><p class="eyebrow">Agent fleet</p><h2>Current runs</h2></div><span class="chip">click a card</span></div>
+              <div class="rail-grid" id="agentFleet"></div>
+            </article>
+
+            <article class="panel card">
+              <div class="section-head"><div><p class="eyebrow">Action pad</p><h2>Launch agents</h2></div></div>
+              <div class="output-list" id="actions"></div>
+            </article>
+          </div>
+
+          <article class="panel card">
+            <div class="section-head"><div><p class="eyebrow">Critical path</p><h2>Dependencies</h2></div><span class="chip">hard and soft links</span></div>
+            <div class="graph" id="dependencyGraph"></div>
+          </article>
+
+          <article class="panel card">
+            <div class="section-head"><div><p class="eyebrow">Timeline</p><h2>Events</h2></div></div>
+            <div class="timeline" id="timeline"></div>
+          </article>
+        </section>
+
+        <aside class="drawer">
+          <article class="panel card detail-box">
+            <div class="drawer-head"><div><p class="eyebrow">Inspector</p><h2 id="detailRole">Nothing selected</h2></div><span class="chip" id="detailKind">idle</span></div>
+            <div id="detailBody" class="detail-list">
+              <div class="empty">Select a task, agent, or alert to inspect details here.</div>
+            </div>
+          </article>
+
+          <article class="panel card detail-box">
+            <div class="section-head"><div><p class="eyebrow">Alerts</p><h2>Incident panel</h2></div></div>
+            <div class="alert-list" id="alerts"></div>
+          </article>
+        </aside>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        data: null,
+        selected: null,
+        actionInFlight: null,
+      };
+
+      const el = {
+        workloadName: document.getElementById('workloadName'),
+        workloadBrief: document.getElementById('workloadBrief'),
+        healthDot: document.getElementById('healthDot'),
+        healthText: document.getElementById('healthText'),
+        agentCount: document.getElementById('agentCount'),
+        activeCount: document.getElementById('activeCount'),
+        alertCount: document.getElementById('alertCount'),
+        sourceChip: document.getElementById('sourceChip'),
+        summaryStrip: document.getElementById('summaryStrip'),
+        laneMap: document.getElementById('laneMap'),
+        agentFleet: document.getElementById('agentFleet'),
+        actions: document.getElementById('actions'),
+        dependencyGraph: document.getElementById('dependencyGraph'),
+        timeline: document.getElementById('timeline'),
+        alerts: document.getElementById('alerts'),
+        detailRole: document.getElementById('detailRole'),
+        detailKind: document.getElementById('detailKind'),
+        detailBody: document.getElementById('detailBody'),
+        flash: document.getElementById('flash'),
+      };
+
+      const escapeHtml = (value) => String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;');
+
+      function flash(message, kind = 'ok') {
+        el.flash.textContent = message;
+        el.flash.className = kind === 'error' ? 'flash error' : 'flash';
+        el.flash.style.display = 'block';
+        window.clearTimeout(el.flash._timer);
+        el.flash._timer = window.setTimeout(() => { el.flash.style.display = 'none'; }, 5000);
+      }
+
+      function statusClass(value) {
+        return ['running', 'waiting', 'blocked', 'done', 'idle'].includes(value) ? value : 'idle';
+      }
+
+      function selectEntity(type, item) {
+        state.selected = { type, item };
+        renderDetail();
+        document.querySelectorAll('.task.selected, .agent.selected, .alert.selected').forEach((node) => node.classList.remove('selected'));
+        const key = `${type}:${item.id ?? item.title ?? item.name}`;
+        const target = document.querySelector(`[data-select-key="${CSS.escape(key)}"]`);
+        if (target) target.classList.add('selected');
+      }
+
+      function renderSummary(data) {
+        el.workloadName.textContent = data.workload.title;
+        el.workloadBrief.textContent = data.workload.brief;
+        el.agentCount.textContent = data.metrics.agentCount;
+        el.activeCount.textContent = data.metrics.activeCount;
+        el.alertCount.textContent = data.metrics.alertCount;
+        el.sourceChip.textContent = data.source;
+        el.summaryStrip.innerHTML = [
+          `${data.metrics.blockedCount} blocked tasks`,
+          `${data.metrics.agentCount} agents`,
+          `${data.metrics.alertCount} alerts`,
+          data.hooksConfigured ? 'hooks armed' : 'hooks not configured',
+        ].map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join('');
+      }
+
+      function renderLaneMap(data) {
+        el.laneMap.innerHTML = data.workload.lanes.map((lane) => {
+          const tasks = data.taskCards.filter((task) => task.lane === lane);
+          return `
+            <div class="runway">
+              <div class="section-head"><div><div class="lane-name">${escapeHtml(lane)}</div><h3>${tasks.length} task(s)</h3></div><span class="chip">${escapeHtml(lane)}</span></div>
+              <div class="lane-list">
+                ${tasks.map((task) => `
+                  <article class="task ${escapeHtml(task.status)}" data-select-key="task:${escapeHtml(task.id)}" role="button" tabindex="0">
+                    <div class="task-top"><small class="small">${escapeHtml(task.id)}</small><span class="status ${escapeHtml(task.status)}">${escapeHtml(task.status)}</span></div>
+                    <h3>${escapeHtml(task.title)}</h3>
+                    <p>${escapeHtml(task.summary)}</p>
+                    <div class="task-line">
+                      <span class="chip">${escapeHtml(task.owner)}</span>
+                      <span class="chip">priority: ${escapeHtml(task.priority)}</span>
+                      <span class="chip">deps: ${escapeHtml(task.dependencyCount)}</span>
+                    </div>
+                    <div class="progress"><span style="width:${task.status === 'done' ? '100%' : task.status === 'running' ? '72%' : task.status === 'blocked' ? '38%' : '22%'}"></span></div>
+                  </article>
+                `).join('') || '<div class="empty">No tasks in this lane.</div>'}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        el.laneMap.querySelectorAll('[data-select-key^="task:"]').forEach((node) => {
+          node.addEventListener('click', () => {
+            const id = node.getAttribute('data-select-key')?.replace('task:', '');
+            const task = data.taskCards.find((item) => item.id === id);
+            if (task) selectEntity('task', task);
+          });
+        });
+      }
+
+      function renderAgents(data) {
+        el.agentFleet.innerHTML = data.agentCards.map((agent) => `
+          <article class="agent ${escapeHtml(agent.status)}" data-select-key="agent:${escapeHtml(agent.id)}" role="button" tabindex="0">
+            <div class="agent-top"><div><h3>${escapeHtml(agent.name)}</h3><p>${escapeHtml(agent.role)} · ${escapeHtml(agent.kind)}</p></div><span class="status ${escapeHtml(agent.status)}">${escapeHtml(agent.status)}</span></div>
+            <p><strong>Updated:</strong> ${escapeHtml(agent.updated)}</p>
+            <p>${escapeHtml(agent.summary || agent.preview)}</p>
+            <div class="task-line"><span class="chip">${escapeHtml(agent.model)}</span>${agent.sessionKey ? `<span class="chip">${escapeHtml(agent.sessionKey)}</span>` : ''}</div>
+          </article>
+        `).join('');
+
+        el.agentFleet.querySelectorAll('[data-select-key^="agent:"]').forEach((node) => {
+          node.addEventListener('click', () => {
+            const id = node.getAttribute('data-select-key')?.replace('agent:', '');
+            const agent = data.agentCards.find((item) => item.id === id);
+            if (agent) selectEntity('agent', agent);
+          });
+        });
+      }
+
+      function renderActions(data) {
+        el.actions.innerHTML = data.actions.map((action) => `
+          <article class="output-box">
+            <div class="section-head"><div><h3>${escapeHtml(action.label)}</h3><div class="small">${escapeHtml(action.role)}</div></div><span class="chip">launch</span></div>
+            <p>${escapeHtml(action.role)} is routed into the multi-agent workload through a live hook.</p>
+            <button data-action-id="${escapeHtml(action.id)}" ${state.actionInFlight === action.id ? 'disabled' : ''}>${state.actionInFlight === action.id ? 'Launching…' : 'Launch agent'}</button>
+          </article>
+        `).join('');
+
+        el.actions.querySelectorAll('button[data-action-id]').forEach((button) => {
+          button.addEventListener('click', async () => {
+            const actionId = button.getAttribute('data-action-id');
+            if (!actionId) return;
+            state.actionInFlight = actionId;
+            render();
+            try {
+              const res = await fetch('/api/actions/trigger', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ actionId }),
+              });
+              const data = await res.json();
+              if (!res.ok || !data.ok) throw new Error(data.error || 'Trigger failed');
+              flash(`${data.action.label} sent to OpenClaw`);
+              await loadState();
+            } catch (error) {
+              flash(error.message || 'Trigger failed', 'error');
+            } finally {
+              state.actionInFlight = null;
+              render();
+            }
+          });
+        });
+      }
+
+      function renderDependencies(data) {
+        el.dependencyGraph.innerHTML = data.dependencies.map((dep) => `
+          <div class="edge">
+            <div class="node">${escapeHtml(dep.from)}</div>
+            <div class="bridge"><span>${escapeHtml(dep.label)}</span><span class="arrow">→</span></div>
+            <div class="node">${escapeHtml(dep.to)}</div>
+          </div>
+        `).join('');
+      }
+
+      function renderTimeline(data) {
+        el.timeline.innerHTML = data.eventFeed.length ? data.eventFeed.map((event) => `
+          <article class="timeline-item">
+            <span class="timeline-time">${escapeHtml(event.time)}</span>
+            <span class="pill ${escapeHtml(event.type)}">${escapeHtml(event.type)}</span>
+            <p>${escapeHtml(event.text)}</p>
+          </article>
+        `).join('') : '<div class="empty">No live events yet.</div>';
+      }
+
+      function renderAlerts(data) {
+        el.alerts.innerHTML = data.alerts.length ? data.alerts.map((alert) => `
+          <article class="alert ${escapeHtml(alert.severity)}" data-select-key="alert:${escapeHtml(alert.title)}" role="button" tabindex="0">
+            <div class="alert-head"><h3>${escapeHtml(alert.title)}</h3><span class="chip severity ${escapeHtml(alert.severity)}">${escapeHtml(alert.severity)}</span></div>
+            <p>${escapeHtml(alert.description)}</p>
+            <div class="btn-row"><span class="chip">${escapeHtml(alert.action)}</span></div>
+          </article>
+        `).join('') : '<div class="empty">No alerts. The board is calm.</div>';
+
+        el.alerts.querySelectorAll('[data-select-key^="alert:"]').forEach((node) => {
+          node.addEventListener('click', () => {
+            const title = node.getAttribute('data-select-key')?.replace('alert:', '');
+            const alert = data.alerts.find((item) => item.title === title);
+            if (alert) selectEntity('alert', alert);
+          });
+        });
+      }
+
+      function renderDetail() {
+        if (!state.data || !state.selected) {
+          el.detailRole.textContent = 'Nothing selected';
+          el.detailKind.textContent = 'idle';
+          el.detailBody.innerHTML = '<div class="empty">Select a task, agent, or alert to inspect details here.</div>';
+          return;
+        }
+        const { type, item } = state.selected;
+        el.detailRole.textContent = item.name || item.title || item.role || 'Selected item';
+        el.detailKind.textContent = type;
+        if (type === 'task') {
+          el.detailBody.innerHTML = `
+            <div><div class="small">Task ID</div><div class="detail-title">${escapeHtml(item.id)}</div></div>
+            <div><div class="small">Owner</div><div>${escapeHtml(item.owner)}</div></div>
+            <div><div class="small">Status</div><div><span class="status ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></div></div>
+            <div><div class="small">Priority</div><div>${escapeHtml(item.priority)}</div></div>
+            <div><div class="small">Dependencies</div><div>${escapeHtml(item.dependencyCount)}</div></div>
+            <div><div class="small">Summary</div><p>${escapeHtml(item.summary)}</p></div>
+          `;
+          return;
+        }
+        if (type === 'agent') {
+          el.detailBody.innerHTML = `
+            <div><div class="small">Role</div><div class="detail-title">${escapeHtml(item.role)}</div></div>
+            <div><div class="small">Status</div><div><span class="status ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></div></div>
+            <div><div class="small">Kind</div><div>${escapeHtml(item.kind)}</div></div>
+            <div><div class="small">Model</div><div>${escapeHtml(item.model)}</div></div>
+            <div><div class="small">Session</div><div>${escapeHtml(item.sessionKey || 'n/a')}</div></div>
+            <div><div class="small">Summary</div><p>${escapeHtml(item.summary || item.preview)}</p></div>
+          `;
+          return;
+        }
+        if (type === 'alert') {
+          el.detailBody.innerHTML = `
+            <div><div class="small">Severity</div><div><span class="chip severity ${escapeHtml(item.severity)}">${escapeHtml(item.severity)}</span></div></div>
+            <div><div class="small">Alert</div><div class="detail-title">${escapeHtml(item.title)}</div></div>
+            <div><div class="small">Description</div><p>${escapeHtml(item.description)}</p></div>
+            <div><div class="small">Suggested action</div><div>${escapeHtml(item.action)}</div></div>
+          `;
+        }
+      }
+
+      function render(data) {
+        state.data = data;
+        renderSummary(data);
+        renderLaneMap(data);
+        renderAgents(data);
+        renderActions(data);
+        renderDependencies(data);
+        renderTimeline(data);
+        renderAlerts(data);
+        renderDetail();
+      }
+
+      async function loadHealth() {
+        try {
+          const res = await fetch('/health');
+          const data = await res.json();
+          if (data.openclawConfigured && data.reachable) {
+            el.healthDot.className = 'status-dot ok';
+            el.healthText.textContent = 'Connected to OpenClaw gateway';
+          } else if (data.openclawConfigured) {
+            el.healthDot.className = 'status-dot bad';
+            el.healthText.textContent = `Gateway configured but unreachable: ${data.error || 'unknown error'}`;
+          } else {
+            el.healthDot.className = 'status-dot';
+            el.healthText.textContent = 'Gateway not configured';
+          }
+        } catch {
+          el.healthDot.className = 'status-dot bad';
+          el.healthText.textContent = 'Health check failed';
+        }
+      }
+
+      async function loadState() {
+        const res = await fetch('/api/state');
+        const data = await res.json();
+        render(data);
+      }
+
+      async function boot() {
+        await loadHealth();
+        await loadState();
+        setInterval(loadHealth, 10000);
+        setInterval(loadState, 12000);
+      }
+
+      boot();
+    </script>
   </body>
 </html>
